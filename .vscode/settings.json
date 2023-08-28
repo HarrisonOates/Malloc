@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "mymalloc.h": "c",
+        "array": "c",
+        "hash_map": "c",
+        "bitset": "c",
+        "string_view": "c",
+        "format": "c",
+        "initializer_list": "c",
+        "span": "c"
+    }
+}
