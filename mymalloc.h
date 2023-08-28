@@ -25,7 +25,7 @@ const size_t kMinAllocationSize = kAlignment;
 // Maximum allocation size (32 MB)
 extern const size_t kMaxAllocationSize;
 // Arena size is 8 MB
-const size_t ARENA_SIZE = (4ull << 20);
+const size_t ARENA_SIZE = (8ull << 20);
 
 void *my_malloc(size_t size);
 void my_free(void *p);
