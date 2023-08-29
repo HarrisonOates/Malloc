@@ -20,9 +20,17 @@ typedef struct Block {
   struct Block* next;
 } Block;
 
+/* Fenceposts for a given chunk of memory */
 typedef struct Fencepost {
-  Block* neighbour;
+  int flag;
 } Fencepost;
+
+/* Defining a linked list to get additional memory from the OS */
+typedef struct Chunk {
+  struct Chunk* prev;
+  struct Chunk* next;
+  Block* blockChunk;
+} Chunk;
 
 
 const size_t kBlockMetadataSize = sizeof(Block);
@@ -39,7 +47,7 @@ bool isAllocated(Block* b);
 void toggleAllocated(Block* b);
 
 /* Our list start */
-static Block* start = NULL;
+static Chunk* chunkList = NULL;
 
 
 void *my_malloc(size_t size) {
@@ -83,11 +91,13 @@ static Block *getMemory(){
 
   /* add fence posts either side of the new chunk */
   Fencepost *f1 = p;
-  f1->neighbour = (void *) (f1 + sizeof(Fencepost));
-  Block* b = f1->neighbour;
+  f1->flag = 1;
+  Block* b = (void *) (f1 + sizeof(Fencepost));
   b->size = ARENA_SIZE - 2 * (sizeof(Fencepost));
   Fencepost *f2 = (void *) (b + b->size - sizeof(Fencepost));
-  f2->neighbour = b;
+  f2->flag = 1;
+  b->prev = (void *) f1;
+  b->next = (void *) f2;
 
   return b;
 }
