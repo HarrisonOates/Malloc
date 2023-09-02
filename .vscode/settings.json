@@ -8,6 +8,7 @@
         "format": "c",
         "initializer_list": "c",
         "span": "c",
-        "random": "c"
+        "random": "c",
+        "valarray": "c"
     }
 }
