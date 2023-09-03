@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Each block of memory is sandwiched between a header and a footer */
 typedef struct Header {
@@ -42,15 +43,15 @@ void clearBit(Header* h);
 Header *root = NULL;
 
 // TODO - add the size of the block into the block & wipe the memory
-
+// TODO - build in checks for blocks larger than 8MB
 void *my_malloc(size_t size) {
   if (size == 0 || size > kMaxAllocationSize){
     return NULL;
   }
 
   // Need to add in metadata into the equation
+  // size += kBlockMetadataSize;
 
-  
   size = round_up(size, kAlignment);
   /* For a block size, if larger than this we should split */
   size_t splitCon = 2*(size + sizeof(Header) - 2*sizeof(Header*) + 1) + 1;
@@ -65,22 +66,22 @@ void *my_malloc(size_t size) {
     }
     wipeBlock(h, size);
     toggleAllocated(h);
-    return ((void*) h) + sizeof(size_t);
+    return (void*) (((size_t) h) + sizeof(size_t));
   }
- 
-  
+
+
   Header* traverse = root;
   while (traverse->next != NULL && traverse->size < size){
     traverse = traverse->next;
   }
-  // We have one of two possibilities now 
-  if (traverse->size >= size){
+  // We have one of two possibilities now
+  if (traverse->size >= size + kBlockMetadataSize){
     if (size >= splitCon){
       traverse = split_block(traverse, size);
     }
     wipeBlock(traverse, size);
     toggleAllocated(traverse);
-    return ((void*) traverse) + sizeof(size_t);
+    return (void *) (((size_t) traverse) + sizeof(size_t));
   }
 
   Header *h = getMemory();
@@ -91,14 +92,14 @@ void *my_malloc(size_t size) {
     if (size > splitCon){
       h = split_block(h, size);
     }
-  
+
   wipeBlock(h, size);
   toggleAllocated(h);
-  return ((void *) h) + sizeof(size_t);
+  return (void *) (((size_t) h) + sizeof(size_t));
 }
 
 void my_free(void *ptr) {
-  if (ptr == NULL){
+  if (ptr == NULL ||(uintptr_t) ptr % 8 != 0 || (uintptr_t) ptr < 8){
     return;
   }
   Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
@@ -111,35 +112,49 @@ void my_free(void *ptr) {
 /* Coalesces contiguous free blocks */
 /* This is super buggy atm - need to fix */
 void coalesce(Header* toCoalesce){
+
+
+
   /* Right block */
   bool rightCoalesceFlag = false;
-  Header* rightBlock = toCoalesce + toCoalesce->size;
+  Header* rightBlock = (Header *) (((size_t) toCoalesce) + toCoalesce->size);
+
+
   if (!isAllocated(rightBlock)){
     toCoalesce->next = rightBlock->next;
     toCoalesce->prev = rightBlock->prev;
     toCoalesce->size += rightBlock->size;
-    getFooter(toCoalesce)->size = toCoalesce->size;
+    Footer* f = getFooter(toCoalesce);
+
+    f->size = toCoalesce->size;
     rightCoalesceFlag = true;
+
   }
 
   /* Left block */
-  Header* leftBlock = (Header * )(toCoalesce - (((Header*) (toCoalesce - sizeof(Footer)))->size));
+  Header* leftBlock = (Header *)(((size_t) toCoalesce) - ((size_t) (((Footer*) ( ((size_t) toCoalesce) - sizeof(Footer)))->size)));
+
   if (!isAllocated(leftBlock)){
     /* We haven't set whether toCoalesce has a 'next' necessarily */
     if (rightCoalesceFlag){
-      /* connect the left block's next and prev neighbours to each other, and then connect it to the so far contiguous block */
-      if (leftBlock->prev != NULL){
-        (leftBlock->prev)->next = leftBlock->next;
+      /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
+    /*
+      if (toCoalesce->prev != NULL){
+        (toCoalesce->prev)->next = toCoalesce->next;
       }
-      if (leftBlock->next != NULL){
-        (leftBlock->next)->prev = leftBlock->prev;
+      if (toCoalesce->next != NULL){
+        (toCoalesce->next)->prev = toCoalesce->prev;
       }
+*/
     }
-    leftBlock->size += toCoalesce->size;
-    leftBlock->prev = toCoalesce->prev;
-    leftBlock->next = toCoalesce->next;
-    getFooter(leftBlock)->size = leftBlock->size;
+
+  /* Getting the size right is very painful - issue is with segfaulting leftblock->size */
+    // leftBlock->size += (toCoalesce->size);
+   //  Footer* f = getFooter(leftBlock);
+   // f->size = leftBlock->size;
+
   }
+
 
 
 }
@@ -167,14 +182,16 @@ static Header *getMemory(){
   }
 
   /* Set up the fenceposts of the block */
-  Footer *f1 = p;
+  Header *f1 = (Header *) p;
   f1->size = 1; /* This doesn't have to be proper; just enough to prevent coalesce from coalescing outside bounds*/
-  Footer *f2 = (Footer *) (((void *)f1) + ARENA_SIZE - sizeof(size_t));
+  Header *f2 = (Header *) (((size_t)f1) + ARENA_SIZE - sizeof(Header));
   f2->size = 1;
 
+  //
+
   /* Set up the header and footer on this block */
-  Header *h = p + sizeof(size_t);
-  h->size = ARENA_SIZE - 2*sizeof(size_t);
+  Header *h = (Header *) ((size_t) p + sizeof(Header));
+  h->size = ARENA_SIZE - 2*sizeof(Header);
   // Allocate the footer
   Footer *f = getFooter(h);
   f->size = h->size;

@@ -9,6 +9,7 @@
         "initializer_list": "c",
         "span": "c",
         "random": "c",
-        "valarray": "c"
+        "valarray": "c",
+        "cstdint": "c"
     }
 }
