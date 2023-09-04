@@ -30,7 +30,7 @@ const size_t kMaxAllocationSize = (32ull << 20) - kBlockMetadataSize; // 32MB - 
 
 /* Function prototypes */
 inline static size_t round_up(size_t size, size_t alignment);
-static Header *getMemory();
+static Header *getMemory(unsigned long long mb);
 Header *split_block(Header *block, size_t size);
 void coalesce(Header* toCoalesce);
 bool isAllocated(Header* b);
@@ -49,14 +49,18 @@ void *my_malloc(size_t size) {
     return NULL;
   }
 
-  // Need to add in metadata into the equation
-  // size += kBlockMetadataSize;
-
   size = round_up(size, kAlignment);
   /* For a block size, if larger than this we should split */
   size_t splitCon = 2*(size + sizeof(Header) - 2*sizeof(Header*) + 1) + 1;
   if (root == NULL){
-    Header *h = getMemory();
+    Header *h;
+    if (size <= (8 << 20) - kBlockMetadataSize){
+      h = getMemory(0);
+    }
+    else {
+      h = getMemory(size / ( 1 << 20));
+    }
+    
     if (h == NULL){
       errno = ENOMEM;
       return NULL;
@@ -71,7 +75,11 @@ void *my_malloc(size_t size) {
 
 
   Header* traverse = root;
-  while (traverse->next != NULL && traverse->size < size){
+  while (traverse->next != NULL){
+    if (traverse->size >= size + kBlockMetadataSize && !isAllocated(traverse) ){
+      break;
+    }
+
     traverse = traverse->next;
   }
   // We have one of two possibilities now
@@ -79,12 +87,27 @@ void *my_malloc(size_t size) {
     if (size >= splitCon){
       traverse = split_block(traverse, size);
     }
+
+    if (traverse->prev != NULL){
+      (traverse->prev)->next = traverse->next;
+    }
+    if (traverse->next != NULL){
+      (traverse->next)->prev = traverse->prev;
+    }
+
     wipeBlock(traverse, size);
     toggleAllocated(traverse);
     return (void *) (((size_t) traverse) + sizeof(size_t));
   }
 
-  Header *h = getMemory();
+  Header *h;
+    if (size <= (8 << 20) - kBlockMetadataSize){
+        h = getMemory(0);
+      }
+    else {
+        h = getMemory((size /( 1 << 20)) + 1);
+      }
+
     if (h == NULL){
       errno = ENOMEM;
       return NULL;
@@ -103,8 +126,11 @@ void my_free(void *ptr) {
     return;
   }
   Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
-  toggleAllocated(h);
-  // coalesce(h);
+  if (isAllocated(h)){
+    toggleAllocated(h);
+    // coalesce(h);
+  }
+  
   
 
 }
@@ -113,22 +139,16 @@ void my_free(void *ptr) {
 /* This is super buggy atm - need to fix */
 void coalesce(Header* toCoalesce){
 
-
-
   /* Right block */
-  bool rightCoalesceFlag = false;
   Header* rightBlock = (Header *) (((size_t) toCoalesce) + toCoalesce->size);
-
-
+  bool rightCoalesceFlag = false; /* When we get to left block, lets us know if we need to muck around with pointers */
   if (!isAllocated(rightBlock)){
     toCoalesce->next = rightBlock->next;
     toCoalesce->prev = rightBlock->prev;
     toCoalesce->size += rightBlock->size;
     Footer* f = getFooter(toCoalesce);
-
     f->size = toCoalesce->size;
     rightCoalesceFlag = true;
-
   }
 
   /* Left block */
@@ -138,21 +158,17 @@ void coalesce(Header* toCoalesce){
     /* We haven't set whether toCoalesce has a 'next' necessarily */
     if (rightCoalesceFlag){
       /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
-    /*
       if (toCoalesce->prev != NULL){
         (toCoalesce->prev)->next = toCoalesce->next;
       }
       if (toCoalesce->next != NULL){
         (toCoalesce->next)->prev = toCoalesce->prev;
       }
-*/
     }
-
-  /* Getting the size right is very painful - issue is with segfaulting leftblock->size */
-    // leftBlock->size += (toCoalesce->size);
-   //  Footer* f = getFooter(leftBlock);
-   // f->size = leftBlock->size;
-
+    
+    leftBlock->size += (toCoalesce->size);
+    Footer* f = getFooter(leftBlock);
+    f->size = leftBlock->size;
   }
 
 
@@ -168,13 +184,20 @@ inline static size_t round_up(size_t size, size_t alignment) {
 /* Requests chunk of memory from the OS. Inserts into chunk list,
  * adds fenceposts, and returns a pointer to the block.
  */
-static Header *getMemory(){
+static Header *getMemory(unsigned long long mb){
   int prot = PROT_READ | PROT_WRITE;
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   int fd = 0;
   off_t offset = 0;
 
-  void *p = mmap(NULL, ARENA_SIZE, prot, flags, fd, offset);
+  void *p;
+  if (mb == 0){ /* Default */
+    p = mmap(NULL, ARENA_SIZE, prot, flags, fd, offset);
+  }
+  else {
+    p = mmap(NULL, (size_t) (mb << 20), prot, flags, fd, offset);
+  }
+
   /* Can't allocate a new chunk from the OS :( */
   if (p == MAP_FAILED){
     errno = ENOMEM;
@@ -182,16 +205,17 @@ static Header *getMemory(){
   }
 
   /* Set up the fenceposts of the block */
-  Header *f1 = (Header *) p;
-  f1->size = 1; /* This doesn't have to be proper; just enough to prevent coalesce from coalescing outside bounds*/
-  Header *f2 = (Header *) (((size_t)f1) + ARENA_SIZE - sizeof(Header));
-  f2->size = 1;
+  Footer *f1 = (Footer*) p;
+  f1->size = 1;
 
-  //
+   /* For right side  */
+  Header *h2 = (Header *) (((size_t)f1) + ARENA_SIZE - (sizeof(Header)));
+  h2->size = 1;
+
 
   /* Set up the header and footer on this block */
-  Header *h = (Header *) ((size_t) p + sizeof(Header));
-  h->size = ARENA_SIZE - 2*sizeof(Header);
+  Header *h = (Header *) ((size_t) p + sizeof(Footer));
+  h->size = ARENA_SIZE - kBlockMetadataSize;
   // Allocate the footer
   Footer *f = getFooter(h);
   f->size = h->size;
@@ -216,6 +240,8 @@ static Header *getMemory(){
  * Assume that there is sufficient room in the block, checked by the calling function.
  * Size is the amount of space for allocation requested.
  */
+
+/* Issue with split block - not enough for the footer */
 Header *split_block(Header *block, size_t size){
   size_t total_size = block->size;
 
@@ -248,7 +274,11 @@ bool isAllocated(Header* h){
 
 /* This was fixed by casting h to size_t */
 Footer *getFooter(Header* h){
+  if (isAllocated(h)){
+    return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
+  }
   return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer));
+  
 }
 /* Sets a block to allocated if it is free and vice versa */
 void toggleAllocated(Header* h){
