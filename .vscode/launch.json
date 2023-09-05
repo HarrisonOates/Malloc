@@ -11,6 +11,24 @@
             "target": "./tests/arrays",
             "cwd": "${workspaceRoot}",
             "valuesFormatting": "parseText"
+        },
+
+        {
+            "name": "Simple2",
+            "type": "gdb",
+            "request": "launch",
+            "target": "./tests/simple2",
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText"
+        },
+
+        {
+            "name": "Bench",
+            "type": "gdb",
+            "request": "launch",
+            "target": "./bench/glibc-malloc-bench-simple",
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText"
         }
     ]
 }

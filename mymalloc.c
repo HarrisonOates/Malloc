@@ -101,11 +101,49 @@ void my_free(void *ptr) {
     return;
   }
 
+  Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
+  if (isAllocated(h)){
+    toggleAllocated(h);
+    coalesce(h);
+  }
+
 }
 
 /* Coalesces contiguous free blocks */
-/* This is super buggy atm - need to fix */
 void coalesce(Header* toCoalesce){
+  /* Right block */
+  Header* rightBlock = (Header *) (((size_t) toCoalesce) + toCoalesce->size);
+  bool rightCoalesceFlag = false; /* When we get to left block, lets us know if we need to muck around with pointers */
+  if (!isAllocated(rightBlock)){
+    toCoalesce->next = rightBlock->next;
+    toCoalesce->prev = rightBlock->prev;
+    toCoalesce->size += rightBlock->size;
+    Footer* f = getFooter(toCoalesce);
+    f->size = toCoalesce->size;
+    rightCoalesceFlag = true;
+  }
+
+  /* Left block */
+  Footer* leftBlockFooter = (size_t) toCoalesce - sizeof(Footer);
+  if (!isAllocated((Header* ) leftBlockFooter)){ // In case we hit a fencepost, which is a footer on the left hand side!
+
+    Header* leftBlock = (Header *)(((size_t) toCoalesce) - ((size_t) leftBlockFooter->size));
+    /* We haven't set whether toCoalesce has a 'next' necessarily */
+    if (rightCoalesceFlag){
+        /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
+        if (toCoalesce->prev != NULL){
+          (toCoalesce->prev)->next = toCoalesce->next;
+        }
+      if (toCoalesce->next != NULL){
+          (toCoalesce->next)->prev = toCoalesce->prev;
+        }
+    }
+    
+    leftBlock->size += (toCoalesce->size);
+    Footer* f = getFooter(leftBlock);
+    f->size = leftBlock->size;
+  }
+
 
 }
 
@@ -136,7 +174,7 @@ void *retrieveAndFormatNewBlock(size_t size){
     if (h->size > splitCon){
       h = split_block(h, size);
     }
-    /* Fix up the linked list */
+    /* Fix up the linked list structure */
     if (h->next != NULL){
       h->next->prev = h->prev;
     }
