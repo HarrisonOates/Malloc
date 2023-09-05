@@ -263,7 +263,7 @@ Header *split_block(Header *block, size_t size){
   Footer *leftFooter = getFooter(left);
   leftFooter->size = left->size;
 
-  Header *right = (((void *) leftFooter) + sizeof(leftFooter));
+  Header *right = (((size_t) leftFooter) + sizeof(leftFooter));
   right->size = total_size - left->size;
   Footer *rightFooter = getFooter(right);
   rightFooter->size = right->size;
