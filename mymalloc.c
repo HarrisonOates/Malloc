@@ -38,12 +38,10 @@ void toggleAllocated(Header* b);
 Footer *getFooter(Header* h);
 void wipeBlock(Header* h, size_t size);
 void clearBit(Header* h);
-
+void *retrieveAndFormatNewBlock(size_t size);
 
 Header *root = NULL;
 
-// TODO - add the size of the block into the block & wipe the memory
-// TODO - build in checks for blocks larger than 8MB
 void *my_malloc(size_t size) {
   if (size == 0 || size > kMaxAllocationSize){
     return NULL;
@@ -51,9 +49,79 @@ void *my_malloc(size_t size) {
 
   size = round_up(size, kAlignment);
   /* For a block size, if larger than this we should split */
-  size_t splitCon = 2*(size + sizeof(Header) - 2*sizeof(Header*) + 1) + 1;
+  size_t splitCon = 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + sizeof(size_t);
+
+  Header *h;
+  /* Intialize the linked list */
   if (root == NULL){
-    Header *h;
+    return retrieveAndFormatNewBlock(size);
+    if (h == NULL){
+      return NULL;
+    }
+    return (void*) (((size_t) h) + sizeof(size_t));
+  }
+  
+  /* Otherwise we are going to have to traverse the list */
+  Header *trav = root;
+  while (trav->next != NULL){
+    if (!isAllocated(trav) && trav->size >= kBlockMetadataSize + size - 2*sizeof(Header*)){
+      break;
+    }
+    trav = trav->next;
+  }
+
+  if (trav == NULL){
+    return retrieveAndFormatNewBlock(size);
+  }
+
+  /* We found our element! */
+  if (!isAllocated(trav) && trav->size >= kBlockMetadataSize + size - 2*sizeof(Header*)){
+    h = trav;
+    if (trav->size > splitCon){
+      h = split_block(h, size);
+    }
+    /* Fix up the linked list */
+    if (h->next != NULL){
+      h->next->prev = h->prev;
+    }
+    if (h->prev != NULL){
+      h->prev->next = h->next;
+    }
+
+    // wipeBlock(h);
+    toggleAllocated(h);
+    return (void*) (((size_t) h) + sizeof(size_t));
+  }
+
+  return retrieveAndFormatNewBlock(size);
+}
+
+void my_free(void *ptr) {
+  if (ptr == NULL || (uintptr_t) ptr % 8 != 0){
+    return;
+  }
+
+}
+
+/* Coalesces contiguous free blocks */
+/* This is super buggy atm - need to fix */
+void coalesce(Header* toCoalesce){
+
+}
+
+/* Rounds a size up to the correct alignment value */
+inline static size_t round_up(size_t size, size_t alignment) {
+  const size_t mask = alignment - 1;
+  return (size + mask) & ~mask;
+}
+
+
+/*
+ * Abstracts the checking of pointers and redundant code away from malloc()
+ */
+void *retrieveAndFormatNewBlock(size_t size){
+  size_t splitCon = 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + sizeof(size_t);
+  Header *h;
     if (size <= (8 << 20) - kBlockMetadataSize){
       h = getMemory(0);
     }
@@ -65,121 +133,22 @@ void *my_malloc(size_t size) {
       errno = ENOMEM;
       return NULL;
     }
-    if (size > splitCon){
+    if (h->size > splitCon){
       h = split_block(h, size);
     }
+    /* Fix up the linked list */
+    if (h->next != NULL){
+      h->next->prev = h->prev;
+    }
+    if (h->prev != NULL){
+      h->prev->next = h->next;
+    }
+
     wipeBlock(h, size);
     toggleAllocated(h);
     return (void*) (((size_t) h) + sizeof(size_t));
-  }
-
-
-  Header* traverse = root;
-  while (traverse->next != NULL){
-    if (traverse->size >= size + kBlockMetadataSize && !isAllocated(traverse) ){
-      break;
-    }
-
-    traverse = traverse->next;
-  }
-  // We have one of two possibilities now
-  if (traverse->size >= size + kBlockMetadataSize){
-    if (size >= splitCon){
-      traverse = split_block(traverse, size);
-    }
-
-    if (traverse->prev != NULL){
-      (traverse->prev)->next = traverse->next;
-    }
-    if (traverse->next != NULL){
-      (traverse->next)->prev = traverse->prev;
-    }
-
-    wipeBlock(traverse, size);
-    toggleAllocated(traverse);
-    return (void *) (((size_t) traverse) + sizeof(size_t));
-  }
-
-  Header *h;
-    if (size <= (8 << 20) - kBlockMetadataSize){
-        h = getMemory(0);
-      }
-    else {
-        h = getMemory((size /( 1 << 20)) + 1);
-      }
-
-    if (h == NULL){
-      errno = ENOMEM;
-      return NULL;
-    }
-    if (size > splitCon){
-      h = split_block(h, size);
-    }
-
-  wipeBlock(h, size);
-  toggleAllocated(h);
-  return (void *) (((size_t) h) + sizeof(size_t));
 }
 
-void my_free(void *ptr) {
-  if (ptr == NULL ||(uintptr_t) ptr % 8 != 0 || (uintptr_t) ptr < 8){
-    return;
-  }
-  Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
-  if (isAllocated(h)){
-    toggleAllocated(h);
-    // coalesce(h);
-  }
-  
-  
-
-}
-
-/* Coalesces contiguous free blocks */
-/* This is super buggy atm - need to fix */
-void coalesce(Header* toCoalesce){
-
-  /* Right block */
-  Header* rightBlock = (Header *) (((size_t) toCoalesce) + toCoalesce->size);
-  bool rightCoalesceFlag = false; /* When we get to left block, lets us know if we need to muck around with pointers */
-  if (!isAllocated(rightBlock)){
-    toCoalesce->next = rightBlock->next;
-    toCoalesce->prev = rightBlock->prev;
-    toCoalesce->size += rightBlock->size;
-    Footer* f = getFooter(toCoalesce);
-    f->size = toCoalesce->size;
-    rightCoalesceFlag = true;
-  }
-
-  /* Left block */
-  Header* leftBlock = (Header *)(((size_t) toCoalesce) - ((size_t) (((Footer*) ( ((size_t) toCoalesce) - sizeof(Footer)))->size)));
-
-  if (!isAllocated(leftBlock)){
-    /* We haven't set whether toCoalesce has a 'next' necessarily */
-    if (rightCoalesceFlag){
-      /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
-      if (toCoalesce->prev != NULL){
-        (toCoalesce->prev)->next = toCoalesce->next;
-      }
-      if (toCoalesce->next != NULL){
-        (toCoalesce->next)->prev = toCoalesce->prev;
-      }
-    }
-    
-    leftBlock->size += (toCoalesce->size);
-    Footer* f = getFooter(leftBlock);
-    f->size = leftBlock->size;
-  }
-
-
-
-}
-
-/* Rounds a size up to the correct alignment value */
-inline static size_t round_up(size_t size, size_t alignment) {
-  const size_t mask = alignment - 1;
-  return (size + mask) & ~mask;
-}
 
 /* Requests chunk of memory from the OS. Inserts into chunk list,
  * adds fenceposts, and returns a pointer to the block.
@@ -226,11 +195,13 @@ static Header *getMemory(unsigned long long mb){
   }
   else {
    // Come back to this - it's potentially buggy
-    Header* n = root->next;
+    Header* n = root;
     root = h;
     h->next = n;
+    n->prev = h;
   }
   h->prev = NULL;
+  h->next = NULL;
 
  // return c->blockChunk;
  return h;
@@ -250,12 +221,12 @@ Header *split_block(Header *block, size_t size){
 
   /* Left block */
   Header *left = block;
-  left->size = total_size - size - kBlockMetadataSize + 2*sizeof(Header*);
+  left->size = total_size - (size + kBlockMetadataSize);
   Footer *leftFooter = getFooter(left);
   leftFooter->size = left->size;
 
-  Header *right = left + left->size;
-  right->size = total_size - left->size - 2*sizeof(Header*);
+  Header *right = (((void *) leftFooter) + sizeof(leftFooter));
+  right->size = total_size - left->size;
   Footer *rightFooter = getFooter(right);
   rightFooter->size = right->size;
 
