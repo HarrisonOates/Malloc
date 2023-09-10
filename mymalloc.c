@@ -187,7 +187,7 @@ inline static size_t round_up(size_t size, size_t alignment) {
  * 
  */
 void setUpSizeClasses(size_t size){
-  int numElements = 23;
+  unsigned long long numElements = 400;
   size_t runningSizeCount = 0;
 
   Header *h;
@@ -204,54 +204,41 @@ void setUpSizeClasses(size_t size){
     }
 
   /* Handle special case of the 8 and 16 byte blocks */
+  /* TODO - whirr up more 8 and 16 byte blocks */
   size_t ultimateSize = h->size;
   h->size = 2 * (numElements * (16 + kBlockMetadataSize - 16)); /* 8 and 16 byte blocks */
   Footer* f = getFooter(h);
   f->size = h->size;
   lists[1] = h;
   runningSizeCount = h->size;
-  h = (h + h->size); 
+ 
   h->prev = NULL;
   h->next = NULL;
+  h = ((void *) h + h->size); 
   /* We whurr through 8mb, and anything beyond that we plug onto the end of the last list */
-  for (int i = 2; i < N_LISTS; i++){
+  for (size_t i = 2; i < N_LISTS; i++){
     /* For the algo to work we need to set up the first in each list before entering the loop */
     Header *root = h;
 
-    size_t freeListBlockSize = 8*(i + 1) + kBlockMetadataSize - 16;
-    h->size = freeListBlockSize;
+    size_t freeListBlockSize = ((size_t) 8)*(i + ((size_t) 1)) + kBlockMetadataSize - ((size_t) 16);
+    h->size = freeListBlockSize * numElements;
     h->prev = NULL;
     h->next = NULL;
     f = getFooter(h);
     f->size = h->size;
     runningSizeCount += h->size;
-    h = h + h -> size;
-
-    Header *prev = root;
-    for (int j = 1; j < numElements; j++){
-      h->size = freeListBlockSize;
-      h->prev = prev;
-      h->next = NULL;
-      prev->next = h;
-      
-      f = getFooter(h);
-      f->size = h->size;
-      runningSizeCount += h->size;
-      prev = h;
-      h = h + h -> size;
-
-    }
     lists[i] = root;
-  
+    h = ((void *) h) + ( h->size);
   }
-  /* We end up with a huge block unused, so we'll tag it on the end of the last list */
-  /*
+  /* We end up with a huge block unused, so we'll tag it on the start of the last list */
+  
   h->size = ultimateSize - runningSizeCount;
   f = getFooter(h);
   f->size = h->size;
-  lists[58]->next = h;
-  h->prev = lists[58];
-  */
+  Header *root = lists[58];
+  root->prev = h;
+  h->next = root;
+  lists[58] = h;
 }
 
 
