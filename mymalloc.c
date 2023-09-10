@@ -206,7 +206,10 @@ void setUpSizeClasses(size_t size){
   /* Handle special case of the 8 and 16 byte blocks */
   /* TODO - whirr up more 8 and 16 byte blocks */
   size_t ultimateSize = h->size;
-  h->size = 2 * (numElements * (16 + kBlockMetadataSize - 16)); /* 8 and 16 byte blocks */
+
+  size_t freeListBlockSize = 16 + kBlockMetadataSize - 16;
+
+  h->size = 2 * (numElements * (freeListBlockSize)); /* 8 and 16 byte blocks */
   Footer* f = getFooter(h);
   f->size = h->size;
   lists[1] = h;
@@ -220,7 +223,7 @@ void setUpSizeClasses(size_t size){
     /* For the algo to work we need to set up the first in each list before entering the loop */
     Header *root = h;
 
-    size_t freeListBlockSize = ((size_t) 8)*(i + ((size_t) 1)) + kBlockMetadataSize - ((size_t) 16);
+    freeListBlockSize = 8 + freeListBlockSize;
     h->size = freeListBlockSize * numElements;
     h->prev = NULL;
     h->next = NULL;
