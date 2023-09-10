@@ -66,7 +66,7 @@ void *my_malloc(size_t size) {
     root = lists[1];
   }
   else {
-    for (int i = 1; i < N_LISTS; i++){
+    for (unsigned int i = 1; i < N_LISTS; i++){
       if ((i + 1) * 8 >= size && lists[i] != NULL){
         root = lists[i];
         sizeClass = i;
@@ -141,7 +141,7 @@ void coalesce(Header* toCoalesce){
   }
 
   /* Left block */
-  Footer* leftBlockFooter = (size_t) toCoalesce - sizeof(Footer);
+  Footer* leftBlockFooter = (Footer *) ((size_t) toCoalesce - sizeof(Footer));
   bool leftCoalesceFlag = false;
   if (!isAllocated((Header* ) leftBlockFooter)){ // In case we hit a fencepost, which is a footer on the left hand side!
 
@@ -355,7 +355,7 @@ Header *split_block(Header *block, size_t size){
   Footer *leftFooter = getFooter(left);
   leftFooter->size = left->size;
 
-  Header *right = (((size_t) leftFooter) + sizeof(leftFooter));
+  Header *right = (Header *) (((size_t) leftFooter) + sizeof(leftFooter));
   right->size = total_size - left->size;
   Footer *rightFooter = getFooter(right);
   rightFooter->size = right->size;
