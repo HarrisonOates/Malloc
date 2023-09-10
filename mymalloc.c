@@ -176,7 +176,7 @@ inline static size_t round_up(size_t size, size_t alignment) {
  * 
  */
 void setUpSizeClasses(size_t size){
-  int numElements = 10;
+  int numElements = 23;
   size_t runningSizeCount = 0;
 
   Header *h;
