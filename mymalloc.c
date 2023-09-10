@@ -329,19 +329,17 @@ static Header *getMemory(unsigned long long mb){
   f->size = h->size;
   /* Append to front of the linked list */
 
-  /* AFTER DINNER - COME BACK TO THIS */
-  /*
+  Header *root = lists[58];
   if (root == NULL){
     root = h;
   }
   else {
-   // Come back to this - it's potentially buggy
     Header* n = root;
     root = h;
     h->next = n;
     n->prev = h;
   }
-  */
+
   h->prev = NULL;
   h->next = NULL;
 
