@@ -142,9 +142,11 @@ void coalesce(Header* toCoalesce){
 
   /* Left block */
   Footer* leftBlockFooter = (size_t) toCoalesce - sizeof(Footer);
+  bool leftCoalesceFlag = false;
   if (!isAllocated((Header* ) leftBlockFooter)){ // In case we hit a fencepost, which is a footer on the left hand side!
 
     Header* leftBlock = (Header *)(((size_t) toCoalesce) - ((size_t) leftBlockFooter->size));
+    leftCoalesceFlag = true;
     /* We haven't set whether toCoalesce has a 'next' necessarily */
     if (rightCoalesceFlag){
         /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
@@ -159,6 +161,15 @@ void coalesce(Header* toCoalesce){
     leftBlock->size += (toCoalesce->size);
     Footer* f = getFooter(leftBlock);
     f->size = leftBlock->size;
+  }
+
+  /* Case no coalescing can occur, we stick the block on the end of the final size class*/
+  if (!leftCoalesceFlag && !rightCoalesceFlag){
+    Header *root = lists[58];
+    toCoalesce->next = root;
+    toCoalesce->prev = NULL;
+    root->prev = toCoalesce;
+    lists[58] = toCoalesce;
   }
 
 
