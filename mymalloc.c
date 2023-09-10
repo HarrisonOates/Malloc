@@ -187,7 +187,7 @@ inline static size_t round_up(size_t size, size_t alignment) {
  * 
  */
 void setUpSizeClasses(size_t size){
-  unsigned long long numElements = 400;
+  size_t numElements = 400;
   size_t runningSizeCount = 0;
 
   Header *h;
@@ -217,21 +217,21 @@ void setUpSizeClasses(size_t size){
  
   h->prev = NULL;
   h->next = NULL;
-  h = ((void *) h + h->size); 
+  h = (Header*) (((size_t) h) + (h->size));
   /* We whurr through 8mb, and anything beyond that we plug onto the end of the last list */
   for (size_t i = 2; i < N_LISTS; i++){
     /* For the algo to work we need to set up the first in each list before entering the loop */
     Header *root = h;
 
     freeListBlockSize = 8 + freeListBlockSize;
-    h->size = freeListBlockSize * numElements;
+    h->size = freeListBlockSize * numElements; 
     h->prev = NULL;
     h->next = NULL;
     f = getFooter(h);
     f->size = h->size;
     runningSizeCount += h->size;
     lists[i] = root;
-    h = ((void *) h) + ( h->size);
+    h = (Header*) (((size_t) h) + (h->size));
   }
   /* We end up with a huge block unused, so we'll tag it on the start of the last list */
   
