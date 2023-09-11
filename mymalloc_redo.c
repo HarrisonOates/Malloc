@@ -47,6 +47,11 @@ bool isAllocated(Header* h){
   return (0x1 & (h->size));
 }
 
+bool isAllocatedF(Footer* h){
+  return (0x1 & (h->size));
+}
+
+
 Footer *getFooter(Header* h){
   if (isAllocated(h)){
     return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
@@ -54,16 +59,27 @@ Footer *getFooter(Header* h){
   return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer));
 }
 
+void setAllocated(Header *h){
+  Footer *f = getFooter(h);
+  h->size |= 1u;
+  f->size |= 1u;
+  return;
+}
+
+void setUnAllocated(Header *h){
+  Footer *f = getFooter(h);
+  h->size &= ~(1u);
+  f->size &= ~(1u);
+  return;
+}
+
 /* Sets a block to allocated if it is free and vice versa */
 void toggleAllocated(Header* h){
-  Footer *f = getFooter(h);
   if (isAllocated(h)){
-    h->size &= ~(1u);
-    f->size &= ~(1u);
+    setUnAllocated(h);
   }
   else {
-    h->size |= 1u;
-    f->size |= 1u;
+    setAllocated(h);
   }
   return;
 }
@@ -179,6 +195,42 @@ Header *splitBlock(Header *block, size_t size){
 }
 
 void coalesce(Header *block){
+  Header *rightBlock = (Header *) (((void *) block) + block->size);
+  bool rightCoalesceFlag = false;
+  bool leftCoalesceFlag = false;
+  if (!isAllocated(rightBlock)){
+    block->next = rightBlock->next;
+    block->prev = rightBlock->prev;
+    block->size += rightBlock->size;
+    Footer* f = getFooter(block);
+    f->size = block->size;
+    rightCoalesceFlag = true; 
+  }
+
+  Footer *leftFooter = (Footer *) (((void *) block) - sizeof(Footer));
+
+  if (!isAllocatedF(leftFooter)){
+    Header *leftBlock = (Header *) (((void *) block) - leftFooter->size);
+    
+    /* Consider coming back to this to keep the free list properly conjoined */
+    //if (rightCoalesceFlag){
+        //if (rightBlock->next != NULL){
+       //    (rightBlock->next)->prev = rightBlock->prev;
+       // }
+       // if (rightBlock -> prev != NULL){
+       //   (rightBlock->prev)->next = rightBlock->next;
+      //  }
+   // }
+
+    leftBlock->size += block->size;
+    Footer* f = getFooter(leftBlock);
+    f->size = leftBlock->size;
+    leftCoalesceFlag = true;
+  }
+
+  if (!leftCoalesceFlag && !rightCoalesceFlag){
+    addToList(block);
+  }
 
 }
 
@@ -204,7 +256,7 @@ void *my_malloc(size_t size) {
     if (h->size >= 2*(kBlockMetadataSize - 2*sizeof(Header*) + size + kMinAllocationSize)){
       h = splitBlock(h, size);
     }
-    toggleAllocated(h);
+    setAllocated(h);
     
     return ((void *) h + sizeof(Header));
   }
@@ -214,7 +266,7 @@ void *my_malloc(size_t size) {
   }
 
   removeFromList(block);
-  toggleAllocated(block);
+  setAllocated(block);
   return ((void *) block + sizeof(Header));
 }
 
@@ -225,7 +277,7 @@ void my_free(void *ptr) {
 
   Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
   if (isAllocated(h)){
-    toggleAllocated(h);
+    setUnAllocated(h);
     coalesce(h);
   }
 }
