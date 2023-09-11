@@ -73,6 +73,10 @@ void *my_malloc(size_t size) {
         break;
       }
     }
+    if (lists[58] != NULL){
+      root = lists[58];
+      sizeClass = 58;
+    }
   }
   
 
@@ -353,6 +357,7 @@ Header *split_block(Header *block, size_t size){
   Header *left = block;
   left->size = total_size - (size + kBlockMetadataSize);
   Footer *leftFooter = getFooter(left);
+/* This was fixed by casting h to size_t */
   leftFooter->size = left->size;
 
   Header *right = (Header *) (((size_t) leftFooter) + sizeof(leftFooter));

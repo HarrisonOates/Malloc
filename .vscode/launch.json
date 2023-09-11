@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Arrays",
             "type": "gdb",
@@ -27,6 +28,15 @@
             "type": "gdb",
             "request": "launch",
             "target": "./bench/glibc-malloc-bench-simple",
+            "cwd": "${workspaceRoot}",
+            "valuesFormatting": "parseText"
+        }
+
+        {
+            "name": "exact",
+            "type": "gdb",
+            "request": "launch",
+            "target": "./tests/exact",
             "cwd": "${workspaceRoot}",
             "valuesFormatting": "parseText"
         }
