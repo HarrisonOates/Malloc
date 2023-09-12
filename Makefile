@@ -7,7 +7,7 @@ ODIR	 = ./out
 LIBTESTFLAGS = -L./out
 
 ifdef RELEASE
-CFLAGS += -O3
+CFLAGS += 
 else
 CFLAGS += -g -ggdb3
 endif

@@ -23,160 +23,21 @@ typedef struct Footer {
   size_t size; /* if bit 0 is hot, the block is allocated */
 } Footer;
 
+Header *lists[N_LISTS];
+
+size_t leftBound = SIZE_MAX;  /* The memory must exist somewhere in the heap */
+size_t rightBound = 0; /* The memory must exist somewhere in the heap */
 
 
 const size_t kBlockMetadataSize = sizeof(Header) + sizeof(Footer);
 const size_t kMaxAllocationSize = (32ull << 20) - kBlockMetadataSize; // 32MB - size metadata
 
-/* Function prototypes */
-inline static size_t round_up(size_t size, size_t alignment);
-static Header *getMemory(unsigned long long mb);
-Header *split_block(Header *block, size_t size);
-void coalesce(Header* toCoalesce);
-bool isAllocated(Header* b);
-void toggleAllocated(Header* b);
-Footer *getFooter(Header* h);
-void wipeBlock(Header* h, size_t size);
-void clearBit(Header* h);
-void *retrieveAndFormatNewBlock(size_t size);
-void setUpSizeClasses(size_t size);
-
-Header* lists[N_LISTS]; /* Contains the root of each size class. We combine 8 and 16 bytes as they share the same block size */
-bool setUpList = false;
-
-void *my_malloc(size_t size) {
-  if (size == 0 || size > kMaxAllocationSize){
-    return NULL;
-  }
-
-  size = round_up(size, kAlignment);
-  /* For a block size, if larger than this we should split */
-  size_t splitCon = 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + sizeof(size_t);
-
-  /* Intialize the linked list */
-  if (!setUpList){
-      setUpSizeClasses(size);
-      setUpList = true;
-  }
-  
-  /* Otherwise we are going to have to traverse the list */
-  Header *root = NULL;
-  int sizeClass = 1;
-  if (size <= 16){
-    root = lists[1];
-  }
-  else {
-    for (unsigned int i = 1; i < N_LISTS; i++){
-      if ((i + 1) * 8 >= size && lists[i] != NULL){
-        root = lists[i];
-        sizeClass = i;
-        break;
-      }
-    }
-    if (lists[58] != NULL){
-      root = lists[58];
-      sizeClass = 58;
-    }
-  }
-  
-
-  if (root == NULL){  /* We couldn't find an appropriate block */
-    return retrieveAndFormatNewBlock(size);
-  }
-
-  Header *trav = root;
-  while (trav->next != NULL){
-    if (!isAllocated(trav) && trav->size >= kBlockMetadataSize + size - 2*sizeof(Header*)){
-      break;
-    }
-    trav = trav->next;
-  }
-
-
-  /* We found our element! */
-  if (!isAllocated(trav) && trav->size >= kBlockMetadataSize + size - 2*sizeof(Header*)){
-    Header *h = trav;
-    if (trav->size > splitCon){
-      h = split_block(h, size);
-    }
-    /* Fix up the linked list */
-    if (h->next != NULL){
-      h->next->prev = h->prev;
-    }
-    if (h->prev != NULL){
-      h->prev->next = h->next;
-    }
-    lists[sizeClass]=h->next;
-
-
-    // wipeBlock(h);
-    toggleAllocated(h);
-    return (void*) (((size_t) h) + sizeof(size_t));
-  }
-
-  return retrieveAndFormatNewBlock(size);
-}
-
-void my_free(void *ptr) {
-  if (ptr == NULL || (uintptr_t) ptr % 8 != 0){
-    return;
-  }
-
-  Header *h = (Header *) (((size_t) ptr) - sizeof(size_t)); /* The block is above the next and prev pointers that we set up */
-  if (isAllocated(h)){
-    toggleAllocated(h);
-    coalesce(h);
-  }
-
-}
-
-/* Coalesces contiguous free blocks */
-void coalesce(Header* toCoalesce){
-  /* Right block */
-  Header* rightBlock = (Header *) (((size_t) toCoalesce) + toCoalesce->size);
-  bool rightCoalesceFlag = false; /* When we get to left block, lets us know if we need to muck around with pointers */
-  if (!isAllocated(rightBlock)){
-    toCoalesce->next = rightBlock->next;
-    toCoalesce->prev = rightBlock->prev;
-    toCoalesce->size += rightBlock->size;
-    Footer* f = getFooter(toCoalesce);
-    f->size = toCoalesce->size;
-    rightCoalesceFlag = true;
-  }
-
-  /* Left block */
-  Footer* leftBlockFooter = (Footer *) ((size_t) toCoalesce - sizeof(Footer));
-  bool leftCoalesceFlag = false;
-  if (!isAllocated((Header* ) leftBlockFooter)){ // In case we hit a fencepost, which is a footer on the left hand side!
-
-    Header* leftBlock = (Header *)(((size_t) toCoalesce) - ((size_t) leftBlockFooter->size));
-    leftCoalesceFlag = true;
-    /* We haven't set whether toCoalesce has a 'next' necessarily */
-    if (rightCoalesceFlag){
-        /* connect the right block's next and prev neighbours to each other, so we keep left where it is in the linked list */
-        if (toCoalesce->prev != NULL){
-          (toCoalesce->prev)->next = toCoalesce->next;
-        }
-      if (toCoalesce->next != NULL){
-          (toCoalesce->next)->prev = toCoalesce->prev;
-        }
-    }
-    
-    leftBlock->size += (toCoalesce->size);
-    Footer* f = getFooter(leftBlock);
-    f->size = leftBlock->size;
-  }
-
-  /* Case no coalescing can occur, we stick the block on the end of the final size class*/
-  if (!leftCoalesceFlag && !rightCoalesceFlag){
-    Header *root = lists[58];
-    toCoalesce->next = root;
-    toCoalesce->prev = NULL;
-    root->prev = toCoalesce;
-    lists[58] = toCoalesce;
-  }
-
-
+void printBlock(Header* block){
+  LOG("Block: %p\n", block);
+  LOG("Size: %zu\n", block->size);
+  LOG("Prev: %p\n", block->prev);
+  LOG("Next: %p\n", block->next);
+  LOG("Footer: %p\n", (Footer*)((void*)block + block->size - sizeof(Footer)));
 }
 
 /* Rounds a size up to the correct alignment value */
@@ -185,120 +46,68 @@ inline static size_t round_up(size_t size, size_t alignment) {
   return (size + mask) & ~mask;
 }
 
-/*
- * Initializes the size classes with a single large block for each class. 
- * Input is a pointer to the block from getMemory(). Should be run once.
- * 
- */
-void setUpSizeClasses(size_t size){
-  size_t numElements = 400;
-  size_t runningSizeCount = 0;
+bool isAllocated(Header* h){
+  return (0x1 & (h->size));
+}
 
-  Header *h;
-    if (size <= (8 << 20) - kBlockMetadataSize){
-      h = getMemory(0);
-    }
-    else {
-      h = getMemory(size / ( 1 << 20));
-    }
-    
-    if (h == NULL){
-      errno = ENOMEM;
-      abort();
-    }
+bool isAllocatedF(Footer* h){
+  return (0x1 & (h->size));
+}
 
-  /* Handle special case of the 8 and 16 byte blocks */
-  /* TODO - whirr up more 8 and 16 byte blocks */
-  size_t ultimateSize = h->size;
+int getIndex(size_t size){
+  int index = (size / 8) - 1 < N_LISTS - 1 ? (size / 8) - 1 : N_LISTS - 1;
+  return index;
+}
 
-  size_t freeListBlockSize = 16 + kBlockMetadataSize - 16;
+bool inHeap(size_t h){
+  return (h >= leftBound && h <= rightBound);
+}
 
-  h->size = 2 * (numElements * (freeListBlockSize)); /* 8 and 16 byte blocks */
-  Footer* f = getFooter(h);
-  f->size = h->size;
-  lists[1] = h;
-  runningSizeCount = h->size;
- 
-  h->prev = NULL;
-  h->next = NULL;
-  h = (Header*) (((size_t) h) + (h->size));
-  /* We whurr through 8mb, and anything beyond that we plug onto the end of the last list */
-  for (size_t i = 2; i < N_LISTS; i++){
-    /* For the algo to work we need to set up the first in each list before entering the loop */
-    Header *root = h;
 
-    freeListBlockSize = 8 + freeListBlockSize;
-    h->size = freeListBlockSize * numElements; 
-    h->prev = NULL;
-    h->next = NULL;
-    f = getFooter(h);
-    f->size = h->size;
-    runningSizeCount += h->size;
-    lists[i] = root;
-    h = (Header*) (((size_t) h) + (h->size));
+Footer *getFooter(Header* h){
+
+  if (isAllocated(h)){
+    return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
   }
-  /* We end up with a huge block unused, so we'll tag it on the start of the last list */
-  
-  h->size = ultimateSize - runningSizeCount;
-  f = getFooter(h);
-  f->size = h->size;
-  Header *root = lists[58];
-  root->prev = h;
-  h->next = root;
-  lists[58] = h;
+  return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer));
 }
 
-
-/*
- * Abstracts the checking of pointers and redundant code away from malloc()
- */
-void *retrieveAndFormatNewBlock(size_t size){
-  size_t splitCon = 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + sizeof(size_t);
-  Header *h;
-    if (size <= (8 << 20) - kBlockMetadataSize){
-      h = getMemory(0);
-    }
-    else {
-      h = getMemory(size / ( 1 << 20));
-    }
-    
-    if (h == NULL){
-      errno = ENOMEM;
-      return NULL;
-    }
-    if (h->size > splitCon){
-      h = split_block(h, size);
-    }
-    /* Fix up the linked list structure */
-    if (h->next != NULL){
-      h->next->prev = h->prev;
-    }
-    if (h->prev != NULL){
-      h->prev->next = h->next;
-    }
-
-    wipeBlock(h, size);
-    toggleAllocated(h);
-    return (void*) (((size_t) h) + sizeof(size_t));
+void setAllocated(Header *h){
+  Footer *f = getFooter(h);
+  if ((size_t) h < (size_t) f){
+    return;
+  }
+  h->size |= 1u;
+  f->size |= 1u;
+  return;
 }
 
+void setUnAllocated(Header *h){
+  Footer *f = getFooter(h);
+  h->size &= ~(1u);
+  f->size &= ~(1u);
+  return;
+}
 
-/* Requests chunk of memory from the OS. Inserts into chunk list,
- * adds fenceposts, and returns a pointer to the block.
- */
+/* Sets a block to allocated if it is free and vice versa */
+void toggleAllocated(Header* h){
+  if (isAllocated(h)){
+    setUnAllocated(h);
+  }
+  else {
+    setAllocated(h);
+  }
+  return;
+}
+
+/* Requests chunk of memory from the OS. Returns NULL on failure */
 static Header *getMemory(unsigned long long mb){
   int prot = PROT_READ | PROT_WRITE;
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
   int fd = 0;
   off_t offset = 0;
 
-  void *p;
-  if (mb == 0){ /* Default */
-    p = mmap(NULL, ARENA_SIZE, prot, flags, fd, offset);
-  }
-  else {
-    p = mmap(NULL, (size_t) (mb << 20), prot, flags, fd, offset);
-  }
+  void *p = mmap(NULL, mb, prot, flags, fd, offset);
 
   /* Can't allocate a new chunk from the OS :( */
   if (p == MAP_FAILED){
@@ -306,104 +115,227 @@ static Header *getMemory(unsigned long long mb){
     return NULL;
   }
 
-  /* Set up the fenceposts of the block */
+  /* Update the bounds */
+  leftBound = (size_t) p < leftBound ? (size_t) p : leftBound;
+  rightBound = (size_t) p + mb > rightBound ? (size_t) p + mb : rightBound;
+
+  /* Set up fence posts */
   Footer *f1 = (Footer*) p;
   f1->size = 1;
+  Header *h1 = (Header *) (((size_t)f1) + mb - (sizeof(Header)));
+  h1->size = 1;
+  // h1->prev = NULL;
+  // h1->next = NULL;
 
-   /* For right side  */
-  Header *h2 = (Header *) (((size_t)f1) + ARENA_SIZE - (sizeof(Header)));
-  h2->size = 1;
-
-
-  /* Set up the header and footer on this block */
-  Header *h = (Header *) ((size_t) p + sizeof(Footer));
-  h->size = ARENA_SIZE - kBlockMetadataSize;
-  // Allocate the footer
-  Footer *f = getFooter(h);
-  f->size = h->size;
-  /* Append to front of the linked list */
-
-  Header *root = lists[58];
-  if (root == NULL){
-    root = h;
-  }
-  else {
-    Header* n = root;
-    root = h;
-    h->next = n;
-    n->prev = h;
-  }
-
-  h->prev = NULL;
-  h->next = NULL;
-
- // return c->blockChunk;
- return h;
-}
-
-/* Returns a block of the correct size, considering the saving of the next and prev pointers.
- * Assume that there is sufficient room in the block, checked by the calling function.
- * Size is the amount of space for allocation requested.
- */
-
-/* Issue with split block - not enough for the footer */
-Header *split_block(Header *block, size_t size){
-  size_t total_size = block->size;
-
-  /* Saving value of next block as it will get overwritten shortly */
-  Header* nextVal = block->next;
-
-  /* Left block */
-  Header *left = block;
-  left->size = total_size - (size + kBlockMetadataSize);
-  Footer *leftFooter = getFooter(left);
-/* This was fixed by casting h to size_t */
-  leftFooter->size = left->size;
-
-  Header *right = (Header *) (((size_t) leftFooter) + sizeof(leftFooter));
-  right->size = total_size - left->size;
-  Footer *rightFooter = getFooter(righHeader*
-  right->next = nextVal;
-  right->prev = left;
-
-  return right;
-}
-
-/* Returns if the block is allocated or not */
-bool isAllocated(Header* h){
-  return (0x1 & (h->size));
-}
-
-/* This was fixed by casting h to size_t */
-Footer *getFooter(Header* h){
-  if (isAllocated(h)){
-    return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
-  }
-  return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer));
+  /* Set up header and footer on this block */
+  Header *h2 = (Header*) (((size_t)f1) + sizeof(Footer));
+  h2->size =  mb - (kBlockMetadataSize);
+  Footer *f2 = getFooter(h2);
+  f2->size = mb - (kBlockMetadataSize);
   
+  /* Return the block to the user */
+  h2->prev = NULL;
+  h2->next = NULL;
+
+  return h2;
 }
-/* Sets a block to allocated if it is free and vice versa */
-void toggleAllocated(Header* h){
-  Footer *f = getFooter(h);
-  if (isAllocated(h)){
-    h->size &= ~(1u);
-    f->size &= ~(1u);
+
+void *get_data(Header *h){ /* Assumes saved metadata */
+  return (void *) (((size_t) h) + sizeof(size_t));
+}
+
+Header *get_block(void *p){ /* Assumes saved metadata */
+  return (Header *) (((size_t) p) - sizeof(size_t));
+}
+
+/* Remove a block from the linked list */
+void removeFromList(Header *block, int index){
+  // printBlock(block);
+  if (isAllocated(block)){
+    return;
   }
-  else {
-    h->size |= 1u;
-    f->size |= 1u;
+  if (block->prev == NULL){
+    lists[index] = block->next;
+    return;
+  }
+  else{
+    if (inHeap((size_t)(block->prev))){
+      block->prev->next = block->next;
+    }
+    
+  }
+  
+  if (block->next != NULL){
+      if (inHeap((size_t)(block->next))){
+        block->next->prev = block->prev;
+      }
+      
   }
   return;
 }
 
-void clearBit(Header* h){
-  Footer *f = getFooter(h);
-  h->size &= ~(1u);
-  f->size &= ~(1u);
+Header *findBlock(size_t size){
+  int index = getIndex(size);
+  while (index < N_LISTS){
+    // We traverse the list
+    Header *curr = lists[index];
+    if (!(curr == NULL)){
+      if (curr->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
+        removeFromList(curr, index);
+        return curr;
+      }
+      while (curr->next != NULL){
+        if (curr->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
+          removeFromList(curr, index);
+          return curr;
+        }
+        curr = curr->next;
+      }
+    }
+    index++;
+  }
+  return NULL;
 }
 
-/* Clears a block ready for the program to use it */
-// TODO - come back and work on it as it fails under 'exact'
-void wipeBlock(Header* h, size_t size){
-  // memset((void*) (h + sizeof(size_t)), 0, size);
+
+
+void addToList(Header* block){
+  int index = getIndex(block->size);
+  if (lists[index] == NULL){
+    lists[index] = block;
+    return;
+  }
+  Header *temp = lists[index];
+  lists[index] = block;
+  lists[index]->prev = NULL;
+  lists[index]->next = temp;
+  temp->prev = lists[index];
+  return;
+}
+
+/* We add the left block to the appropriately sized free list */
+/* Come back and add in the accounting for getting rid of the next and prev pointers */
+Header *split_block(Header *block, size_t size){
+  if (block->size < 2*(kBlockMetadataSize) + size + kMinAllocationSize){
+    return block;
+  }
+  /* Fix up the free list */
+  if (block->next != NULL){
+    block->next->prev = block->prev;
+  }
+  if (block->prev != NULL){
+    block->prev->next = block->next;
+  }
+
+  size_t totalSize = block->size;
+  Header *left = block;
+  left->size = totalSize - (size + kBlockMetadataSize);
+  Footer *f = getFooter(left);
+  if (!inHeap((size_t) f)){
+    return NULL;
+  }
+  f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
+  left->next = NULL;
+  left->prev = NULL;
+
+  Header *right = (Header*) ((size_t) left + left->size);
+  right->size = totalSize - left->size;
+  Footer *rightFooter = getFooter(right);
+  rightFooter->size = right->size;
+  setUnAllocated(left);
+  setUnAllocated(right);
+
+  addToList(left);
+  return right;
+}
+
+void coalesce(Header *block){
+  Footer *leftFooter = (Footer *) ((size_t) block - sizeof(Footer));
+  bool leftCoalesceFlag = false;
+  if (!isAllocatedF(leftFooter)){
+    Header *left = (Header *) ((size_t) block - leftFooter->size);
+    left->size += block->size; // Maybe we don't add the whole block size?
+    Footer *f = getFooter(left);
+    if (left->size > rightBound - leftBound){
+
+    }
+    else {
+      // Here, we are allocating past the end of the heap for whatever reason. Our allocation of sizes seems to not be particularly valid lol.
+    f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
+    
+    rightBound;
+    left->size = f->size;
+    leftCoalesceFlag = true;
+    block = left;
+    }
+
+    
+  }
+
+  Header *right = (Header *) ((size_t) block + block->size);
+  bool rightCoalesceFlag = false;
+  if  (!isAllocated(right)){
+    if (!leftCoalesceFlag){
+      block->next = right->next;
+      block->prev = right->prev;
+      block->size += right->size;
+      rightCoalesceFlag = true;
+    }
+    else if (right->next != NULL && !inHeap((size_t)(right->next))){
+      //
+    }
+    else {
+      if (right->next != NULL){
+        right->next->prev = right->prev;
+      }
+      if (right->prev != NULL){
+        right->prev->next = right->next;
+      }
+      block->size += right->size;
+      rightCoalesceFlag = true;
+    }
+  }
+
+  if (!(leftCoalesceFlag || rightCoalesceFlag)){
+    block->next = NULL;
+    block->prev = NULL;
+    addToList(block);
+  }
+  return;
+}
+
+
+void *my_malloc(size_t size){
+  if (size == 0 || size > kMaxAllocationSize){
+    return NULL;
+  }
+  size = round_up(size, kAlignment);
+  Header *block = findBlock(size);
+  if (block == NULL){
+    block = getMemory(round_up(size, ARENA_SIZE));
+  }
+  Header* toReturn = split_block(block, size);
+  if (!inHeap((size_t) toReturn)){
+    toReturn = getMemory(round_up(size, ARENA_SIZE));
+    toReturn = split_block(toReturn, size);
+  }
+  setAllocated(toReturn);
+  return get_data(toReturn);
+}
+
+void my_free(void *ptr){
+  if (ptr == NULL || (uintptr_t) ptr % 8 != 0){
+    return;
+  }
+
+  if (!inHeap((size_t) ptr)){
+    return;
+  }
+
+  Header* h = get_block(ptr);
+
+  if (isAllocated(h) && inHeap((size_t) h)){
+    setUnAllocated(h);
+    coalesce(h);
+  }
 }

@@ -66,7 +66,6 @@ bool inHeap(size_t h){
 
 Footer *getFooter(Header* h){
 
-
   if (isAllocated(h)){
     return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
   }
@@ -75,6 +74,9 @@ Footer *getFooter(Header* h){
 
 void setAllocated(Header *h){
   Footer *f = getFooter(h);
+  if ((size_t) h < (size_t) f){
+    return;
+  }
   h->size |= 1u;
   f->size |= 1u;
   return;
@@ -157,11 +159,17 @@ void removeFromList(Header *block, int index){
     return;
   }
   else{
-    block->prev->next = block->next;
+    if (inHeap((size_t)(block->prev))){
+      block->prev->next = block->next;
+    }
+    
   }
   
   if (block->next != NULL){
-      block->next->prev = block->prev;
+      if (inHeap((size_t)(block->next))){
+        block->next->prev = block->prev;
+      }
+      
   }
   return;
 }
@@ -223,6 +231,9 @@ Header *split_block(Header *block, size_t size){
   Header *left = block;
   left->size = totalSize - (size + kBlockMetadataSize);
   Footer *f = getFooter(left);
+  if (!inHeap((size_t) f)){
+    return NULL;
+  }
   f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
   left->next = NULL;
   left->prev = NULL;
@@ -245,14 +256,20 @@ void coalesce(Header *block){
     Header *left = (Header *) ((size_t) block - leftFooter->size);
     left->size += block->size; // Maybe we don't add the whole block size?
     Footer *f = getFooter(left);
+    if (left->size > rightBound - leftBound){
 
-    // Here, we are allocating past the end of the heap for whatever reason. Our allocation of sizes seems to not be particularly valid lol.
+    }
+    else {
+      // Here, we are allocating past the end of the heap for whatever reason. Our allocation of sizes seems to not be particularly valid lol.
     f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
     
     rightBound;
     left->size = f->size;
     leftCoalesceFlag = true;
     block = left;
+    }
+
+    
   }
 
   Header *right = (Header *) ((size_t) block + block->size);
@@ -264,8 +281,8 @@ void coalesce(Header *block){
       block->size += right->size;
       rightCoalesceFlag = true;
     }
-    else if (right->next != NULL && inHeap((size_t)(right->next))){
-      setAllocated(right);
+    else if (right->next != NULL && !inHeap((size_t)(right->next))){
+      //
     }
     else {
       if (right->next != NULL){
@@ -298,6 +315,10 @@ void *my_malloc(size_t size){
     block = getMemory(round_up(size, ARENA_SIZE));
   }
   Header* toReturn = split_block(block, size);
+  if (!inHeap((size_t) toReturn)){
+    toReturn = getMemory(round_up(size, ARENA_SIZE));
+    toReturn = split_block(toReturn, size);
+  }
   setAllocated(toReturn);
   return get_data(toReturn);
 }
@@ -313,7 +334,7 @@ void my_free(void *ptr){
 
   Header* h = get_block(ptr);
 
-  if (isAllocated(h)){
+  if (isAllocated(h) && inHeap((size_t) h)){
     setUnAllocated(h);
     coalesce(h);
   }
