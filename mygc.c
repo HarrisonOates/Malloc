@@ -10,6 +10,20 @@ void set_start_of_stack(void *start_addr) {
 
 const size_t kMaxAllocationSize = 0ull;
 
+/* We're storing the allocated addresses in a binary tree */
+typedef struct Node {
+  size_t address;
+  struct Node *left;
+  struct Node *right;
+} Node;
+
+Node *addressTree = NULL;
+
+void *addNode(size_t address){
+  
+}
+
+
 void *my_malloc_gc(size_t size) {
   return NULL;
 }

@@ -124,8 +124,6 @@ static Header *getMemory(unsigned long long mb){
   f1->size = 1;
   Header *h1 = (Header *) (((size_t)f1) + mb - (sizeof(Header)));
   h1->size = 1;
-  // h1->prev = NULL;
-  // h1->next = NULL;
 
   /* Set up header and footer on this block */
   Header *h2 = (Header*) (((size_t)f1) + sizeof(Footer));
