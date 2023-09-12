@@ -25,13 +25,15 @@ typedef struct Footer {
 
 Header *lists[N_LISTS];
 
-size_t leftBound = SIZE_MAX;  /* The memory must exist somewhere in the heap */
-size_t rightBound = 0; /* The memory must exist somewhere in the heap */
+/* The memory must exist somewhere in the heap */
+size_t leftBound = SIZE_MAX;  
+size_t rightBound = 0;
 
 
 const size_t kBlockMetadataSize = sizeof(Header) + sizeof(Footer);
-const size_t kMaxAllocationSize = (32ull << 20) - kBlockMetadataSize; // 32MB - size metadata
+const size_t kMaxAllocationSize = (32ull << 20) - kBlockMetadataSize; /* 32MB - size metadata */
 
+/* Logging block, for testing purposes only */
 void printBlock(Header* block){
   LOG("Block: %p\n", block);
   LOG("Size: %zu\n", block->size);
@@ -46,32 +48,41 @@ inline static size_t round_up(size_t size, size_t alignment) {
   return (size + mask) & ~mask;
 }
 
+
+/* These both return if a block is allocated or not */
 bool isAllocated(Header* h){
   return (0x1 & (h->size));
 }
-
 bool isAllocatedF(Footer* h){
   return (0x1 & (h->size));
 }
 
+/* 
+ * Gets the index of an appropriate free list for the size.
+ */
 int getIndex(size_t size){
   int index = (size / 8) - 1 < N_LISTS - 1 ? (size / 8) - 1 : N_LISTS - 1;
   return index;
 }
 
+/*
+ * Checks if a pointer is in the heap
+ */
 bool inHeap(size_t h){
   return (h >= leftBound && h <= rightBound);
 }
 
 
 Footer *getFooter(Header* h){
-
   if (isAllocated(h)){
     return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer) - 1);
   }
   return (Footer *) (((size_t) h) + (h->size) - sizeof(Footer));
 }
 
+/* 
+ * Sets a block to allocated
+ */
 void setAllocated(Header *h){
   Footer *f = getFooter(h);
   if ((size_t) h < (size_t) f){
@@ -82,21 +93,13 @@ void setAllocated(Header *h){
   return;
 }
 
+/* 
+ * Sets a block to unallocated
+ */
 void setUnAllocated(Header *h){
   Footer *f = getFooter(h);
   h->size &= ~(1u);
   f->size &= ~(1u);
-  return;
-}
-
-/* Sets a block to allocated if it is free and vice versa */
-void toggleAllocated(Header* h){
-  if (isAllocated(h)){
-    setUnAllocated(h);
-  }
-  else {
-    setAllocated(h);
-  }
   return;
 }
 
@@ -138,17 +141,22 @@ static Header *getMemory(unsigned long long mb){
   return h2;
 }
 
-void *get_data(Header *h){ /* Assumes saved metadata */
+/* Gets data block from a Header* 
+ * Assumes saved metadata optimization
+ */
+void *get_data(Header *h){
   return (void *) (((size_t) h) + sizeof(size_t));
 }
 
-Header *get_block(void *p){ /* Assumes saved metadata */
+/* Gets block from a data header
+ * Assumes saved metadata optimization
+ */
+Header *get_block(void *p){
   return (Header *) (((size_t) p) - sizeof(size_t));
 }
 
 /* Remove a block from the linked list */
 void removeFromList(Header *block, int index){
-  // printBlock(block);
   if (isAllocated(block)){
     return;
   }
@@ -156,26 +164,23 @@ void removeFromList(Header *block, int index){
     lists[index] = block->next;
     return;
   }
-  else{
-    if (inHeap((size_t)(block->prev))){
+  else if (inHeap((size_t)(block->prev))){
       block->prev->next = block->next;
-    }
-    
   }
-  
-  if (block->next != NULL){
-      if (inHeap((size_t)(block->next))){
-        block->next->prev = block->prev;
-      }
-      
+
+  if (block->next != NULL && inHeap((size_t)(block->next))){
+    block->next->prev = block->prev;
   }
   return;
 }
 
+/* Finds a block of the given size
+ * Returns NULL if no block is found
+ */
 Header *findBlock(size_t size){
   int index = getIndex(size);
   while (index < N_LISTS){
-    // We traverse the list
+    /* We traverse the list */
     Header *curr = lists[index];
     if (!(curr == NULL)){
       if (curr->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
@@ -195,8 +200,7 @@ Header *findBlock(size_t size){
   return NULL;
 }
 
-
-
+/* Adds a block of memory to the appropriately-sized free list */
 void addToList(Header* block){
   int index = getIndex(block->size);
   if (lists[index] == NULL){
@@ -211,10 +215,12 @@ void addToList(Header* block){
   return;
 }
 
-/* We add the left block to the appropriately sized free list */
-/* Come back and add in the accounting for getting rid of the next and prev pointers */
+/* 
+ *Splits a block into two, returning a block of size (size + kBlockMetadataSize - 2*sizeof(Header*)
+ * We add the left block to the appropriately sized free list.
+*/
 Header *split_block(Header *block, size_t size){
-  if (block->size < 2*(kBlockMetadataSize) + size + kMinAllocationSize){
+  if (block->size < 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + kMinAllocationSize){
     return block;
   }
   /* Fix up the free list */
@@ -224,10 +230,9 @@ Header *split_block(Header *block, size_t size){
   if (block->prev != NULL){
     block->prev->next = block->next;
   }
-
   size_t totalSize = block->size;
   Header *left = block;
-  left->size = totalSize - (size + kBlockMetadataSize);
+  left->size = totalSize - (size + kBlockMetadataSize - 2*sizeof(Header*));
   Footer *f = getFooter(left);
   if (!inHeap((size_t) f)){
     return NULL;
@@ -247,27 +252,22 @@ Header *split_block(Header *block, size_t size){
   return right;
 }
 
+/* Coalesces a newly free block and makes sure it is in the right size class */
 void coalesce(Header *block){
   Footer *leftFooter = (Footer *) ((size_t) block - sizeof(Footer));
   bool leftCoalesceFlag = false;
   if (!isAllocatedF(leftFooter)){
     Header *left = (Header *) ((size_t) block - leftFooter->size);
-    left->size += block->size; // Maybe we don't add the whole block size?
+    left->size += block->size;
     Footer *f = getFooter(left);
-    if (left->size > rightBound - leftBound){
-
+    if (!(left->size > rightBound - leftBound)){
+      /* Making sure we don't go out of bounds */
+      f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
+      rightBound;
+      left->size = f->size;
+      leftCoalesceFlag = true;
+      block = left;
     }
-    else {
-      // Here, we are allocating past the end of the heap for whatever reason. Our allocation of sizes seems to not be particularly valid lol.
-    f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
-    
-    rightBound;
-    left->size = f->size;
-    leftCoalesceFlag = true;
-    block = left;
-    }
-
-    
   }
 
   Header *right = (Header *) ((size_t) block + block->size);
@@ -279,10 +279,7 @@ void coalesce(Header *block){
       block->size += right->size;
       rightCoalesceFlag = true;
     }
-    else if (right->next != NULL && !inHeap((size_t)(right->next))){
-      //
-    }
-    else {
+    else if (!(right->next != NULL && !inHeap((size_t)(right->next)))){
       if (right->next != NULL){
         right->next->prev = right->prev;
       }
@@ -322,11 +319,7 @@ void *my_malloc(size_t size){
 }
 
 void my_free(void *ptr){
-  if (ptr == NULL || (uintptr_t) ptr % 8 != 0){
-    return;
-  }
-
-  if (!inHeap((size_t) ptr)){
+  if (ptr == NULL || (uintptr_t) ptr % 8 != 0 || !inHeap((size_t) ptr)){
     return;
   }
 
