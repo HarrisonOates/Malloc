@@ -362,11 +362,7 @@ Header *split_block(Header *block, size_t size){
 
   Header *right = (Header *) (((size_t) leftFooter) + sizeof(leftFooter));
   right->size = total_size - left->size;
-  Footer *rightFooter = getFooter(right);
-  rightFooter->size = right->size;
-
-  /* Setting up the linked list again */
-  left->next = right;
+  Footer *rightFooter = getFooter(righHeader*
   right->next = nextVal;
   right->prev = left;
 

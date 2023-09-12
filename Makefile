@@ -1,6 +1,6 @@
 CC       = gcc
 # https://developers.redhat.com/blog/2018/03/21/compiler-and-linker-flags-gcc
-CFLAGS   = -fPIC -Wall -Wextra -Werror=format-security -Werror=implicit-function-declaration -std=gnu17 -pedantic
+CFLAGS   = -fPIC -Wall -Wextra -Werror=format-security -Werror=implicit-function-declaration -std=gnu17 -pedantic -g3
 LIBFLAGS = -shared
 MALLOC   = mymalloc
 ODIR	 = ./out

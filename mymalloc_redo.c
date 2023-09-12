@@ -23,7 +23,10 @@ typedef struct Footer {
   size_t size; /* if bit 0 is hot, the block is allocated */
 } Footer;
 
-Header* root = NULL;
+Header *lists[N_LISTS];
+
+size_t leftBound = SIZE_MAX;  /* The memory must exist somewhere in the heap */
+size_t rightBound = 0; /* The memory must exist somewhere in the heap */
 
 
 const size_t kBlockMetadataSize = sizeof(Header) + sizeof(Footer);
@@ -49,6 +52,15 @@ bool isAllocated(Header* h){
 
 bool isAllocatedF(Footer* h){
   return (0x1 & (h->size));
+}
+
+int getIndex(size_t size){
+  int index = (size / 8) - 1 < N_LISTS - 1 ? (size / 8) - 1 : N_LISTS - 1;
+  return index;
+}
+
+bool inHeap(size_t h){
+  return (h >= leftBound && h <= rightBound);
 }
 
 
@@ -91,7 +103,6 @@ static Header *getMemory(unsigned long long mb){
   int fd = 0;
   off_t offset = 0;
 
-  size_t allocatedSize;
   void *p = mmap(NULL, mb, prot, flags, fd, offset);
 
   /* Can't allocate a new chunk from the OS :( */
@@ -100,10 +111,16 @@ static Header *getMemory(unsigned long long mb){
     return NULL;
   }
 
+  /* Set heap pointers */
+
+    leftBound = leftBound < (size_t) p ? leftBound : (size_t) p;
+    rightBound = rightBound > (size_t) p + mb ? rightBound : (size_t) p + mb;
+
+
   /* Set up fence posts */
   Footer *f1 = (Footer*) p;
   f1->size = 1;
-  Header *h1 = (Header *) (((void *)f1) + mb - (sizeof(Header)));
+  Header *h1 = (Header *) (((size_t)f1) + mb - (sizeof(Header)));
   h1->size = 1;
 
   /* Set up header and footer on this block */
@@ -119,48 +136,58 @@ static Header *getMemory(unsigned long long mb){
   return h2;
 }
 
-/* Returns a block of size (size + kBlockMetaDataSize - 2*sizeof(Header*)) and ensures the linked list is maintained*/
-Header *split_block(Header *block, size_t size){
-  return NULL;
-}
-
 /* Appends a block to the front of the linked list */
-void addToList(Header *block){
-  if (root == NULL){
-    root = block;
+void addToList(Header *block, int index){
+  if (isAllocated(block)){
+    return;
+  }
+  if (lists[index] == NULL){
+    lists[index] = block;
     return;
   }
 
-  Header *temp = root;
-  root = block;
-  root->prev = NULL;
-  root->next = temp;
-  temp->prev = root;
+  Header *temp = lists[index];
+  lists[index] = block;
+  lists[index]->prev = NULL;
+  lists[index]->next = temp;
+  temp->prev = lists[index];
   return;
 }
 
 /* Remove a block from the linked list */
-void removeFromList(Header *block){
-  if (block->prev == NULL){
-    root = block->next;
+void removeFromList(Header *block, int index){
+  // printBlock(block);
+  if (isAllocated(block)){
     return;
   }
-  block->prev->next = block->next;
+  if (block->prev == NULL){
+    lists[index] = block->next;
+    return;
+  }
+  if (inHeap((size_t)(block->prev)) && inHeap((size_t) block->prev->next)){
+    block->prev->next = block->next;
+  }
+
+  
   if (block->next != NULL){
-    block->next->prev = block->prev;
+    if (inHeap((size_t) (block->next)) && inHeap((size_t) (block->next->prev))){
+      block->next->prev = block->prev;
+    }
+
+        
   }
   return;
 }
 
 /* Find the first block of at least this size */
-Header *traverseListForSize(size_t size){
-  if (root == NULL){
+Header *traverseListForSize(size_t size, int index){
+  if (lists[index] == NULL || !inHeap(((size_t) lists[index]))){
     return NULL;
   }
-  else if (root->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
-    return root;
+  else if (lists[index]->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
+    return lists[index];
   }
-  Header *curr = root;
+  Header *curr = lists[index];
   while (curr->next != NULL){
     if (curr->size >= size + kBlockMetadataSize - 2*sizeof(Header*)){
       return curr;
@@ -170,67 +197,117 @@ Header *traverseListForSize(size_t size){
   return NULL;
 }
 
-/* returns a block of precisely size (size + kBlockMetaDataSize - 2*sizeof(header))*/
-Header *splitBlock(Header *block, size_t size){
+/* returns a block of precisely size (size + kBlockMetaDataSize - 2*sizeof(header)) 
+ * The left split block is left hanging, to be inserted in the correct size class 
+ */
+Header* splitBlock(Header *block, size_t size){
   size_t totalSize = block->size;
   Header* nextVal = block->next;
   Header* prevVal = block->prev;
+  if (prevVal != NULL){
+    prevVal->next = nextVal;
+  }
+  if (nextVal != NULL){
+    nextVal->prev = prevVal;
+  }
 
   Header* left = block;
   left->size = totalSize - (size + kBlockMetadataSize - 2*sizeof(Header*));
   Footer* leftFooter = getFooter(left);
   leftFooter->size = left->size;
 
-  Header *right = (Header*) (((void *) left) + left->size);
+  Header *right = (Header*) (((size_t) left) + left->size);
   right->size = totalSize - left->size;
   Footer *rightFooter = getFooter(right);
   rightFooter->size = right->size;
 
-  left->prev = prevVal;
-  left->next = right; 
-  right->prev = left;
-  right->next = nextVal;
-  
+  left->prev = NULL;
+  left->next = NULL; 
+  right->prev = NULL;
+  right->next = NULL;
   return right;
 }
 
 void coalesce(Header *block){
-  Header *rightBlock = (Header *) (((void *) block) + block->size);
-  bool rightCoalesceFlag = false;
+  Header *temp = block; // So I can overwrite the initial block further down 
+  Footer *leftFooter = (Footer *) (((size_t) block) - sizeof(Footer));
   bool leftCoalesceFlag = false;
-  if (!isAllocated(rightBlock)){
-    block->next = rightBlock->next;
-    block->prev = rightBlock->prev;
-    block->size += rightBlock->size;
-    Footer* f = getFooter(block);
-    f->size = block->size;
-    rightCoalesceFlag = true; 
-  }
-
-  Footer *leftFooter = (Footer *) (((void *) block) - sizeof(Footer));
-
   if (!isAllocatedF(leftFooter)){
-    Header *leftBlock = (Header *) (((void *) block) - leftFooter->size);
-    
-    /* Consider coming back to this to keep the free list properly conjoined */
-    //if (rightCoalesceFlag){
-        //if (rightBlock->next != NULL){
-       //    (rightBlock->next)->prev = rightBlock->prev;
-       // }
-       // if (rightBlock -> prev != NULL){
-       //   (rightBlock->prev)->next = rightBlock->next;
-      //  }
-   // }
-
+    Header *leftBlock = (Header *) (((size_t) block) - leftFooter->size);
     leftBlock->size += block->size;
     Footer* f = getFooter(leftBlock);
     f->size = leftBlock->size;
     leftCoalesceFlag = true;
+    block = leftBlock;
   }
 
-  if (!leftCoalesceFlag && !rightCoalesceFlag){
-    addToList(block);
+
+  Header *rightBlock = (Header *) (((size_t) temp) + temp->size);
+  bool rightCoalesceFlag = false;
+  if (!isAllocated(rightBlock)){
+    if (leftCoalesceFlag){
+      if (rightBlock->next != NULL){
+        rightBlock->next->prev = rightBlock->prev;
+      }
+      if (rightBlock->prev != NULL){
+        rightBlock->prev->next = rightBlock->next;
+      }
+      block->size += rightBlock->size;
+      Footer* f = getFooter(block);
+      f->size = block->size;
+    }
+    else {
+      block->next = rightBlock->next;
+      block->prev = rightBlock->prev;
+      block->size += rightBlock->size;
+      Footer* f = getFooter(block);
+      f->size = block->size;
+    }
+   
+    rightCoalesceFlag = true; 
   }
+
+
+
+  if (!leftCoalesceFlag && !rightCoalesceFlag){
+    block->next = NULL;
+    block->prev = NULL;
+    
+  }
+ // addToList(block, getIndex(block->size));
+  return;
+}
+
+Header *findBlock(size_t size){
+  int index = getIndex(size);
+
+  while (index < N_LISTS){
+    Header *block = traverseListForSize(size, index);
+    if (block != NULL && !isAllocated(block)){
+      removeFromList(block, index);
+      return block;
+    }
+    index++;
+  }
+
+  return NULL;
+}
+
+/* We request some memory, partition it, and insert the split block into the free list at the correct place */
+Header *RequestAndPartition(size_t size){
+  Header *block = getMemory(round_up(size, ARENA_SIZE));
+  if (block == NULL){
+    return NULL;
+  }
+  if (block->size > 2*(kBlockMetadataSize - 2*sizeof(Header*)) + size + kMinAllocationSize){
+    block = splitBlock(block, size);
+    // Left is hanging on purpose
+    Footer *leftFooter = (Footer *) (((size_t) block) - sizeof(Footer));
+    Header *left = (Header *) (((size_t) block) - leftFooter->size);
+    addToList(left, getIndex(left->size));
+  }
+  
+  return block;
 
 }
 
@@ -241,33 +318,15 @@ void *my_malloc(size_t size) {
 
   size = round_up(size, kAlignment);
 
-  /* Traverse the list */
-  if (root == NULL){
-    Header* h;
+  Header* block = findBlock(size);
 
-    /* Round up getMemory to the nearest 8mb*/
-    h = getMemory(round_up(size, ARENA_SIZE));
-    addToList(h);
-  }
-
-  Header* block = traverseListForSize(size);
   if (block == NULL){
-    Header *h = getMemory(round_up(size, ARENA_SIZE));
-    if (h->size >= 2*(kBlockMetadataSize - 2*sizeof(Header*) + size + kMinAllocationSize)){
-      h = splitBlock(h, size);
-    }
-    setAllocated(h);
-    
-    return ((void *) h + sizeof(Header));
+    block = RequestAndPartition(size);
   }
 
-  if (block->size >= 2*(kBlockMetadataSize - 2*sizeof(Header*) + size + kMinAllocationSize)){
-    block = splitBlock(block, size);
-  }
-
-  removeFromList(block);
   setAllocated(block);
-  return ((void *) block + sizeof(Header));
+  return (void *) ((size_t) block + sizeof(size_t));
+
 }
 
 void my_free(void *ptr) {
@@ -280,6 +339,8 @@ void my_free(void *ptr) {
     setUnAllocated(h);
     coalesce(h);
   }
+
+  return;
 }
 
 
