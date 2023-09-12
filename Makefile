@@ -1,13 +1,13 @@
 CC       = gcc
 # https://developers.redhat.com/blog/2018/03/21/compiler-and-linker-flags-gcc
-CFLAGS   = -fPIC -Wall -Wextra -Werror=format-security -Werror=implicit-function-declaration -std=gnu17 -pedantic -g3
+CFLAGS   = -fPIC -Wall -Wextra -Werror=format-security -Werror=implicit-function-declaration -std=gnu17 -pedantic
 LIBFLAGS = -shared
 MALLOC   = mymalloc
 ODIR	 = ./out
 LIBTESTFLAGS = -L./out
 
 ifdef RELEASE
-CFLAGS += 
+CFLAGS += -O3
 else
 CFLAGS += -g -ggdb3
 endif
