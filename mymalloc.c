@@ -263,7 +263,6 @@ void coalesce(Header *block){
     if (!(left->size > rightBound - leftBound)){
       /* Making sure we don't go out of bounds */
       f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
-      rightBound;
       left->size = f->size;
       leftCoalesceFlag = true;
       block = left;

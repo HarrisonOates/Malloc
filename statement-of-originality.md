@@ -17,3 +17,5 @@ uid: u7468212
 ---
 # References
 - [1] geeksForGeeks. 2023. Example implementation of red-black tree insertion. Retrieved from https://www.geeksforgeeks.org/c-program-red-black-tree-insertion/
+
+-[2] geeksForGeeks. 2023. Example implementation of red-black tree deletion. Retrieved from https://www.geeksforgeeks.org/deletion-in-red-black-tree/

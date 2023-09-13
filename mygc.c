@@ -16,10 +16,13 @@ void set_start_of_stack(void *start_addr) {
   start_of_stack = start_addr;
 }
 
+/* Function prototype for my_free, as we use it to delete a node */
+void my_free(void *ptr);
+
 /* 
  * We're storing the allocated addresses in a red-black tree.
  * We need to define all the helper functions to get the tree working and rotating correctly.
- * Inspired by [1], with modifications made to better suit my needs
+ * Inspired by [1] and [2], with modifications made to better suit my needs
  */
 /**************************************************************************************************/
 enum Colour{BLACK, RED};
@@ -158,10 +161,134 @@ void balanceAndColour(Node* root, Node* node){
   }
 }
 
-/* To complete */
+Node* findMinimumNode(Node* node) {
+  while (node->left != NULL){
+    node = node->left;
+  }
+  return node;
+}
+
+/* Swaps a node with another node */
+void swap(Node* u, Node* v){
+  if (u->parent == NULL){
+    addressTree = v;
+  }
+  else if (u == u->parent->left){
+    u->parent->left = v;
+  }
+  else {
+    u->parent->right = v;
+  }
+  if (v != NULL){
+    v->parent = u->parent;
+  }
+}
+/* Rebalances the tree */
+void deleteFixup(Node* node){
+  while (node != addressTree && node->colour == BLACK){
+    if (node == node->parent->left){
+      Node* siblingOfNode = node->parent->right;
+      if (siblingOfNode->colour == RED){
+        siblingOfNode->colour = BLACK;
+        node->parent->colour = RED;
+        rotateLeft(node->parent);
+        siblingOfNode = node->parent->right;
+      }
+      if (siblingOfNode->left->colour == BLACK && siblingOfNode->right->colour == RED){
+        siblingOfNode->colour = RED;
+        node = node->parent;
+      }
+      else {
+        if (siblingOfNode->right->colour == BLACK){
+          siblingOfNode->left->colour = BLACK;
+          siblingOfNode->colour = RED;
+          rotateRight(siblingOfNode);
+          siblingOfNode = node->parent->right;
+        }
+
+        siblingOfNode->colour = node->parent->colour;
+        node->parent->colour = BLACK;
+        siblingOfNode->right->colour = BLACK;
+        rotateLeft(node->parent);
+        node = addressTree;
+      }
+    }
+    else {
+      Node* siblingOfNode = node->parent->left;
+      if (siblingOfNode->colour == RED){
+        siblingOfNode->colour = BLACK;
+        node->parent->colour = RED;
+        rotateRight(node->parent);
+        siblingOfNode = node->parent->left;
+      }
+
+      if (siblingOfNode->right->colour == BLACK && siblingOfNode->left->colour == BLACK){
+        siblingOfNode->colour = RED;
+        node = node->parent;
+      }
+      else {
+        if (siblingOfNode->left->colour == BLACK){
+          siblingOfNode->right->colour = BLACK;
+          siblingOfNode->colour = RED;
+          rotateLeft(siblingOfNode);
+          siblingOfNode = node->parent->left;
+        }
+
+        siblingOfNode->colour = node->parent->colour;
+        node->parent->colour = BLACK;
+        siblingOfNode->left->colour = BLACK;
+        rotateRight(node->parent);
+        node = addressTree;
+      }
+    }
+  }
+}
+
+/* Deletes and rebalances the tree, freeing the requisite memory */
 void delete(Node* node){
+  
+  Node* x; 
+  Node* y = node;
+  enum Colour yOriginalColour = y->colour;
+
+  if (node->left == NULL){
+    x = node->right;
+    swap(node, node->right);
+  }
+  else if (node->right == NULL){
+    x = node->left;
+    swap(node, node->left);
+  }
+  else {
+    y = findMinimumNode(node->right);
+    yOriginalColour = y->colour;
+    x = y->right;
+
+    if (y->parent == node){
+      x->parent = y;
+    }
+    else {
+      swap(y, y->right);
+      y->right = node->right;
+      y->right->parent = y;
+    }
+
+    swap(node, y);
+    y->left = node->left;
+    y->left->parent = y;
+    y->colour = node->colour;
+  }
+
+  my_free(node);
+
+  if (yOriginalColour == BLACK){
+    deleteFixup(x);
+  }
+
   return;
 }
+
+
 
 /* Find the element in the tree that fits here */
 Node* traverse(Node* node, size_t key){
@@ -190,6 +317,7 @@ Node* traverse(Node* node, size_t key){
 /* Each block of memory is sandwiched between a header and a footer */
 typedef struct Header {
   size_t size; /* if bit 0 is hot, the block is allocated */
+               /* if bit 1 is hot, the mark bit is set */
   struct Header* prev;
   struct Header* next;
 } Header;
@@ -438,7 +566,6 @@ void coalesce(Header *block){
     if (!(left->size > rightBound - leftBound)){
       /* Making sure we don't go out of bounds */
       f->size = ((size_t) f) + left->size <= rightBound ? left->size : (left->size - (rightBound - ((size_t) f)));
-      rightBound;
       left->size = f->size;
       leftCoalesceFlag = true;
       block = left;
@@ -527,6 +654,7 @@ void removeFromTree(size_t ptr){
 
   delete(toDelete);
   /* Rebalance */
+  return;
 
 }
 
@@ -541,17 +669,86 @@ void *my_malloc_gc(size_t size) {
 }
 
 void my_free_gc(void *ptr) {
-  my_free(ptr);
   /* Traverse the list and remove the pointer from the address tree */
-
+  removeFromTree((size_t) ptr);
+  my_free(ptr);
 }
 
 void *get_end_of_stack() {
   return __builtin_frame_address(1);
 }
 
+/* Checks if a value is potentially a pointer*/
+bool isPtr(void* ptr){
+  if (ptr == NULL || (uintptr_t) ptr % 8 != 0 || !inHeap((size_t) ptr)){
+    return false;
+  }
+
+  /* We search the set of allocated blocks */
+  if (traverse(addressTree, (size_t) ptr) != NULL){
+    return true;
+  }
+  return false;
+
+}
+
+/* Checks if the mark bit is set */
+bool markBitSet(Header* p){
+  return (p->size & 2u);
+}
+
+/* Sets the mark bit*/
+void setMarkBit(Header* p){
+  p->size |= 2u;
+  return;
+}
+/* Clears the mark bit*/
+void clearMarkBit(Header* p){
+  p->size &= ~(2u);
+  return;
+}
+
+
+void mark(void *ptr){
+  if (!isPtr(ptr)){
+    return;
+  }
+  if (markBitSet((Header*) ptr)){
+    return;
+  }
+  setMarkBit((Header*) ptr);
+  for (size_t i = 0; i < (size_t)((((Header*) ptr )->size)); i+= kMinAllocationSize){
+    mark(ptr + i);
+  }
+  return;
+}
+
+void sweep(void *p, void* end){
+  while (p < end){
+    if (markBitSet((Header*) p)){
+      clearMarkBit(p);
+    }
+    else if (isAllocated(p)){
+      my_free_gc(p);
+    }
+    p += ((Header*) p)->size;
+  }
+}
 void my_gc() {
   void *end_of_stack = get_end_of_stack();
 
-  // TODO
+  /* We iterate through the stack to find all the pointers */
+  void* ptr = start_of_stack;
+
+  /* Mark */
+  while (ptr > end_of_stack){
+    mark(ptr);
+    ptr -= kMinAllocationSize;
+  }
+
+  /* Sweep */
+  ptr = start_of_stack;
+  sweep(ptr, end_of_stack);
+
+  return;
 }
