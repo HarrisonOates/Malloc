@@ -16,4 +16,4 @@ uid: u7468212
 # list numbered references below (replace the example with your own references) 
 ---
 # References
-- [1] Example Author. 2023. example code video. Retrieved from https://example.com/video
+- [1] geeksForGeeks. 2023. Example implementation of red-black tree insertion. Retrieved from https://www.geeksforgeeks.org/c-program-red-black-tree-insertion/
