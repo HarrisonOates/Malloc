@@ -640,6 +640,9 @@ void my_free(void *ptr){
 void addToTree(size_t address){
   Node *new = (Node *) my_malloc(sizeof(Node));
   new->address = address;
+  if (addressTree == NULL){
+    addressTree = new;
+  }
   insert(addressTree, new);
   balanceAndColour(addressTree, new);
   addressTree->colour = BLACK;
@@ -724,7 +727,7 @@ void mark(void *ptr){
 }
 
 void sweep(void *p, void* end){
-  while (p < end){
+  while (p > end){
     if (markBitSet((Header*) p)){
       clearMarkBit(p);
     }
@@ -747,8 +750,8 @@ void my_gc() {
   }
 
   /* Sweep */
-  ptr = start_of_stack;
-  sweep(ptr, end_of_stack);
+  ptr = end_of_stack;
+  sweep(ptr, start_of_stack);
 
   return;
 }

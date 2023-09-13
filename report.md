@@ -12,12 +12,12 @@ When memory is requested from the OS via `getMemory()`, fenceposts, consisting o
 I successfully reduced metadata by using the least significant bit of size to indicate whether a block was allocated, alongside placing `next` and `prev` at the end of `Header` so I can allocate the saved space to the user. To achieve time coalescing, the size metadata was stored in `Footer` for each block, allowing the centre block to look to the left by `sizeof(Footer)` to get the jump distance. Adapting the single free list design to multiple free lists necessitated passing the list index to my list operation functions (`addToList, removeFromList, traverseListForSize`) and adapting `split_block` to add the 'offcut' to an appropriate list. 
 
 <!-- Garbage collection -->
-My garbage collector is a work in progress, and while it compiles it segfaults when the default `mygctest` is called. 
+My garbage collector is a work in progress, and has yet to be tested beyond basic functionality. 
 Nonetheless, here are the details: I chose to implement a red-black tree, `addressTree` to store all addresses that have currently been allocated. This code was adapted from implementations by [1] and [2]. `my_malloc_gc` and `my_free_gc` call `my_malloc` and `my_free`, respectively, but also insert or delete a node into the address tree as required. `my_gc` steps through the stack, looking for pointers and then marking them if they exist in the allocation tree. The block is marked by bit 1 in the `size` parameter of the header.
-Any pointers not in the stack frame are then freed in the sweep stage of the collector.
+Any pointers not in the stack frame are then freed in the sweep stage of the collector. Adapting the lecture code to a downward-growing stack was difficult - I ended up reusing boundary tag code from `coalesce()` to travel through the memory chunk.
 
 <!-- Two implementation challenges in implementation of malloc -->
-My first implementation challenge was in deciding the appropriateness of pointers between `void *, Header *` and `size_t`. Multiple times I ran `test.py` and got segfaulted with one choice, only to change it and pass the test I failed previously. This was solved as I understood the problem space more and saw the same lines of code being repeated throughout the assignment.
+My first implementation challenge was in deciding the appropriateness of casting pointers between `void *, Header *` and `size_t`. Multiple times I ran `test.py` and got segfaulted with one choice, only to change it and pass the test I failed previously. This was solved as I understood the problem space more and saw the same lines of code being repeated throughout the assignment.
 My second implementation challenge was in adapting my implementation to multiple free lists. This necessitated significantly more bookkeeping, incurring a slight performance penalty in the benchmark (on the order of 0.08 seconds on my Ryzen 5 3600 / 3200MHz system).
 
 
