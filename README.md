@@ -1,9 +1,10 @@
-# comp2310-2023-assignment-1
+# MyMalloc
 
-This is the assignment repository for your first assignment. 
+This repository hosts:
+- An explicit, multiple free list malloc implementation with constant-time coalescing (in mymalloc.c); and
+- A conservative mark-and-sweep garbage collector (in mygc.c)
 
-Do not modify the `.gitlab-ci.yml` file as the results of your CI will be used to generate grades. 
+Both `malloc` and the GC passed all marking test cases, which alongside the report gave me a high-range HD for the assignment.
+I keep my files as submitted for posterity.
 
-Tampering with this file will be noticed and may result in academic misconduct. 
-
-For more information, [read the assessment page](https://comp.anu.edu.au/courses/comp2310/assessments/01-malloc/).
+This project was written for Systems, Networks & Concurrency at the ANU.
